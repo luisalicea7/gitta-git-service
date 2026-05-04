@@ -96,6 +96,11 @@ func (h *Handler) handleRPC(w http.ResponseWriter, r *http.Request, route Route)
 	w.Header().Set("content-type", service.ResultContentType())
 	if err := gitexec.RunRPC(r.Context(), r.Body, w, service, repoPath, h.logger); err != nil {
 		h.logger.Error("git rpc failed", "err", err, "service", service)
+		return
+	}
+
+	if service == gitexec.ReceivePack {
+		h.postReceive(r, auth, repoPath)
 	}
 }
 
@@ -145,4 +150,36 @@ func (h *Handler) prepareRepo(
 	}
 
 	return repoPath, true
+}
+
+func (h *Handler) postReceive(r *http.Request, auth api.AuthResponse, repoPath string) {
+	refs, err := gitexec.ListRefs(r.Context(), repoPath)
+	if err != nil {
+		h.logger.Error("list refs failed", "err", err, "repositoryId", auth.Repository.ID)
+		return
+	}
+
+	result, status, err := h.service.PostReceive(r.Context(), auth, refs)
+	if err != nil {
+		h.logger.Error(
+			"post-receive callback failed",
+			"err",
+			err,
+			"status",
+			status,
+			"reason",
+			result.Reason,
+			"repositoryId",
+			auth.Repository.ID,
+		)
+		return
+	}
+
+	h.logger.Debug(
+		"post-receive synced refs",
+		"repositoryId",
+		auth.Repository.ID,
+		"synced",
+		result.Synced,
+	)
 }

@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/luisalicea7/gitta-git-service/internal/api"
@@ -26,6 +28,11 @@ type authRule struct {
 	username string
 }
 
+type fakeAPIState struct {
+	mu          sync.Mutex
+	postReceive []api.PostReceiveRequest
+}
+
 func TestGitHTTPPushAndClone(t *testing.T) {
 	repoRoot := t.TempDir()
 	repo := api.Repository{
@@ -37,12 +44,13 @@ func TestGitHTTPPushAndClone(t *testing.T) {
 		DefaultBranch: "main",
 	}
 
+	state := &fakeAPIState{}
 	apiServer := fakeAPIServer(t, authRule{
 		token:    "write-token",
 		allowed:  true,
 		repo:     repo,
 		username: "luis",
-	})
+	}, state)
 	defer apiServer.Close()
 
 	gitServer := gitHTTPServer(apiServer.URL, repoRoot)
@@ -72,10 +80,24 @@ func TestGitHTTPPushAndClone(t *testing.T) {
 		t.Fatalf("expected bare repo at %s", repoPath)
 	}
 
+	originalHead := gitOutput(t, work, "rev-parse", "HEAD")
+	requests := state.postReceiveRequests()
+	if len(requests) != 1 {
+		t.Fatalf("post-receive requests = %d, want 1", len(requests))
+	}
+	if requests[0].RepositoryID != repo.ID {
+		t.Fatalf("post-receive repository id = %q, want %q", requests[0].RepositoryID, repo.ID)
+	}
+	if len(requests[0].Refs) != 1 {
+		t.Fatalf("post-receive refs = %d, want 1", len(requests[0].Refs))
+	}
+	if requests[0].Refs[0] != (api.GitRef{Name: "refs/heads/main", SHA: originalHead, Type: "branch"}) {
+		t.Fatalf("post-receive ref = %#v, want main at %s", requests[0].Refs[0], originalHead)
+	}
+
 	cloneDir := filepath.Join(t.TempDir(), "clone")
 	runGit(t, "", "clone", basicAuthURL(gitServer.URL, "luis", "write-token")+"/luis/my-repo.git", cloneDir)
 
-	originalHead := gitOutput(t, work, "rev-parse", "HEAD")
 	clonedHead := gitOutput(t, cloneDir, "rev-parse", "HEAD")
 	if originalHead != clonedHead {
 		t.Fatalf("cloned HEAD = %q, want %q", clonedHead, originalHead)
@@ -83,7 +105,7 @@ func TestGitHTTPPushAndClone(t *testing.T) {
 }
 
 func TestGitHTTPRejectsMissingAuth(t *testing.T) {
-	apiServer := fakeAPIServer(t, authRule{allowed: true})
+	apiServer := fakeAPIServer(t, authRule{allowed: true}, nil)
 	defer apiServer.Close()
 
 	gitServer := gitHTTPServer(apiServer.URL, t.TempDir())
@@ -109,7 +131,7 @@ func TestGitHTTPRejectsReadOnlyPush(t *testing.T) {
 		allowed:  false,
 		reason:   "insufficient_scope",
 		username: "luis",
-	})
+	}, nil)
 	defer apiServer.Close()
 
 	gitServer := gitHTTPServer(apiServer.URL, t.TempDir())
@@ -139,7 +161,7 @@ func TestGitHTTPCloneBeforeFirstPushReturnsNotFound(t *testing.T) {
 		allowed:  true,
 		repo:     api.Repository{ID: "repo-1", OwnerUserID: "owner-1", Owner: "luis", Slug: "my-repo"},
 		username: "luis",
-	})
+	}, nil)
 	defer apiServer.Close()
 
 	gitServer := gitHTTPServer(apiServer.URL, t.TempDir())
@@ -156,10 +178,15 @@ func TestGitHTTPCloneBeforeFirstPushReturnsNotFound(t *testing.T) {
 	}
 }
 
-func fakeAPIServer(t *testing.T, rule authRule) *httptest.Server {
+func fakeAPIServer(t *testing.T, rule authRule, state *fakeAPIState) *httptest.Server {
 	t.Helper()
 
 	return newLocalServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/internal/git/post-receive" {
+			handlePostReceive(w, r, state)
+			return
+		}
+
 		if r.URL.Path != "/internal/git/auth" {
 			http.NotFound(w, r)
 			return
@@ -195,6 +222,37 @@ func fakeAPIServer(t *testing.T, rule authRule) *httptest.Server {
 			Permission: "owner",
 		})
 	}))
+}
+
+func handlePostReceive(w http.ResponseWriter, r *http.Request, state *fakeAPIState) {
+	if r.Header.Get("x-gitta-internal-secret") != internalSecret {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(api.PostReceiveResponse{Status: "error", Reason: "unauthorized"})
+		return
+	}
+
+	var req api.PostReceiveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if state != nil {
+		state.mu.Lock()
+		state.postReceive = append(state.postReceive, req)
+		state.mu.Unlock()
+	}
+
+	_ = json.NewEncoder(w).Encode(api.PostReceiveResponse{Status: "ok", Synced: len(req.Refs)})
+}
+
+func (s *fakeAPIState) postReceiveRequests() []api.PostReceiveRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	requests := make([]api.PostReceiveRequest, len(s.postReceive))
+	copy(requests, s.postReceive)
+	return requests
 }
 
 func gitHTTPServer(apiURL string, repoRoot string) *httptest.Server {
@@ -245,7 +303,7 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	if err != nil {
 		t.Fatalf("git %v failed: %v", args, err)
 	}
-	return string(output)
+	return strings.TrimSpace(string(output))
 }
 
 func gitCmd(dir string, args ...string) *exec.Cmd {

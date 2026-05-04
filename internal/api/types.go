@@ -32,3 +32,20 @@ type AuthResponse struct {
 	Repository Repository `json:"repository"`
 	Permission string     `json:"permission"`
 }
+
+type GitRef struct {
+	Name string `json:"name"`
+	SHA  string `json:"sha"`
+	Type string `json:"type"`
+}
+
+type PostReceiveRequest struct {
+	RepositoryID string   `json:"repositoryId"`
+	Refs         []GitRef `json:"refs"`
+}
+
+type PostReceiveResponse struct {
+	Status string `json:"status"`
+	Synced int    `json:"synced"`
+	Reason string `json:"reason"`
+}

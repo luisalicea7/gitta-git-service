@@ -71,6 +71,17 @@ func (s *Service) PrepareRepository(
 	return repoPath, PrepareOK, nil
 }
 
+func (s *Service) PostReceive(
+	ctx context.Context,
+	auth api.AuthResponse,
+	refs []api.GitRef,
+) (api.PostReceiveResponse, int, error) {
+	return s.apiClient.PostReceive(ctx, api.PostReceiveRequest{
+		RepositoryID: auth.Repository.ID,
+		Refs:         refs,
+	})
+}
+
 type PrepareResult string
 
 const (
