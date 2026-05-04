@@ -16,6 +16,7 @@ import (
 	"github.com/luisalicea7/gitta-git-service/internal/health"
 	"github.com/luisalicea7/gitta-git-service/internal/httpgit"
 	"github.com/luisalicea7/gitta-git-service/internal/logging"
+	"github.com/luisalicea7/gitta-git-service/internal/objects"
 )
 
 func main() {
@@ -36,11 +37,14 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	apiClient := api.NewClient(cfg.APIInternalURL, cfg.GitServiceInternalSecret)
 	gitHandler := httpgit.NewHandler(apiClient, cfg.RepoRoot, logger)
 	commitsHandler := commits.NewHandler(cfg.RepoRoot, cfg.GitServiceInternalSecret, logger)
+	objectsHandler := objects.NewHandler(cfg.RepoRoot, cfg.GitServiceInternalSecret, logger)
 
 	mux.HandleFunc("GET /health", health.Handler)
 	mux.HandleFunc("GET /health/live", health.Handler)
 	mux.HandleFunc("GET /health/ready", health.Handler)
 	mux.Handle("POST /internal/repos/commits", commitsHandler)
+	mux.HandleFunc("POST /internal/repos/tree", objectsHandler.Tree)
+	mux.HandleFunc("POST /internal/repos/blob", objectsHandler.Blob)
 	mux.Handle("/", gitHandler)
 
 	server := &http.Server{
