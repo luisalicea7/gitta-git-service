@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luisalicea7/gitta-git-service/internal/api"
+	"github.com/luisalicea7/gitta-git-service/internal/commits"
 	"github.com/luisalicea7/gitta-git-service/internal/config"
 	"github.com/luisalicea7/gitta-git-service/internal/health"
 	"github.com/luisalicea7/gitta-git-service/internal/httpgit"
@@ -34,10 +35,12 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	mux := http.NewServeMux()
 	apiClient := api.NewClient(cfg.APIInternalURL, cfg.GitServiceInternalSecret)
 	gitHandler := httpgit.NewHandler(apiClient, cfg.RepoRoot, logger)
+	commitsHandler := commits.NewHandler(cfg.RepoRoot, cfg.GitServiceInternalSecret, logger)
 
 	mux.HandleFunc("GET /health", health.Handler)
 	mux.HandleFunc("GET /health/live", health.Handler)
 	mux.HandleFunc("GET /health/ready", health.Handler)
+	mux.Handle("POST /internal/repos/commits", commitsHandler)
 	mux.Handle("/", gitHandler)
 
 	server := &http.Server{
