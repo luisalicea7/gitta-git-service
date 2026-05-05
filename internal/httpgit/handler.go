@@ -127,7 +127,7 @@ func (h *Handler) authorize(
 		return auth, true
 	}
 
-	writeAuthDenied(w, r, auth)
+	writeAuthDenied(w, auth, service)
 	return api.AuthResponse{}, false
 }
 
@@ -140,12 +140,12 @@ func (h *Handler) prepareRepo(
 	repoPath, result, err := h.service.PrepareRepository(r.Context(), auth, service)
 	if err != nil {
 		h.logger.Error("prepare repository failed", "err", err, "result", result)
-		writePrepareFailure(w, r, result)
+		writePrepareFailure(w, result)
 		return "", false
 	}
 
 	if result != PrepareOK {
-		writePrepareFailure(w, r, result)
+		writePrepareFailure(w, result)
 		return "", false
 	}
 

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -66,8 +67,8 @@ func TestGitHTTPPushAndClone(t *testing.T) {
 	runGit(t, work, "add", "README.md")
 	runGit(t, work, "commit", "-m", "initial")
 	runGit(t, work, "branch", "-M", "main")
-	runGit(t, work, "remote", "add", "origin", basicAuthURL(gitServer.URL, "luis", "write-token")+"/luis/my-repo.git")
-	runGit(t, work, "push", "origin", "main")
+	runGit(t, work, "remote", "add", "origin", gitServer.URL+"/luis/my-repo.git")
+	runGitWithCredentials(t, work, "luis", "write-token", "push", "origin", "main")
 
 	repoPath, err := repos.Path(repoRoot, repos.RepositoryIdentity{
 		OwnerUserID: repo.OwnerUserID,
@@ -96,7 +97,7 @@ func TestGitHTTPPushAndClone(t *testing.T) {
 	}
 
 	cloneDir := filepath.Join(t.TempDir(), "clone")
-	runGit(t, "", "clone", basicAuthURL(gitServer.URL, "luis", "write-token")+"/luis/my-repo.git", cloneDir)
+	runGitWithCredentials(t, "", "luis", "write-token", "clone", gitServer.URL+"/luis/my-repo.git", cloneDir)
 
 	clonedHead := gitOutput(t, cloneDir, "rev-parse", "HEAD")
 	if originalHead != clonedHead {
@@ -147,11 +148,15 @@ func TestGitHTTPRejectsReadOnlyPush(t *testing.T) {
 	runGit(t, work, "add", "README.md")
 	runGit(t, work, "commit", "-m", "initial")
 	runGit(t, work, "branch", "-M", "main")
-	runGit(t, work, "remote", "add", "origin", basicAuthURL(gitServer.URL, "luis", "read-token")+"/luis/my-repo.git")
+	runGit(t, work, "remote", "add", "origin", gitServer.URL+"/luis/my-repo.git")
 
-	cmd := gitCmd(work, "push", "origin", "main")
-	if err := cmd.Run(); err == nil {
+	cmd := gitCmdWithEnv(work, credentialPromptEnv(t, "luis", "read-token"), "push", "origin", "main")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
 		t.Fatal("git push succeeded, want failure")
+	}
+	if !strings.Contains(string(output), "token does not have repo:write scope") {
+		t.Fatalf("git push output missing scope error:\n%s", string(output))
 	}
 }
 
@@ -173,8 +178,12 @@ func TestGitHTTPCloneBeforeFirstPushReturnsNotFound(t *testing.T) {
 	}
 	defer res.Body.Close()
 
+	body := readResponseBody(t, res)
 	if res.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusNotFound)
+	}
+	if !strings.Contains(body, "repository not found") {
+		t.Fatalf("body = %q, want repository not found", body)
 	}
 }
 
@@ -295,6 +304,16 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func runGitWithCredentials(t *testing.T, dir string, username string, password string, args ...string) {
+	t.Helper()
+
+	cmd := gitCmdWithEnv(dir, credentialPromptEnv(t, username, password), args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
+	}
+}
+
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 
@@ -307,12 +326,50 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 }
 
 func gitCmd(dir string, args ...string) *exec.Cmd {
+	return gitCmdWithEnv(dir, nil, args...)
+}
+
+func gitCmdWithEnv(dir string, extraEnv []string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(cmd.Env, extraEnv...)
 	return cmd
 }
 
 func basicAuthURL(baseURL, username, password string) string {
 	return "http://" + username + ":" + password + "@" + baseURL[len("http://"):]
+}
+
+func credentialPromptEnv(t *testing.T, username string, password string) []string {
+	t.Helper()
+
+	scriptPath := filepath.Join(t.TempDir(), "git-askpass")
+	script := `#!/bin/sh
+case "$1" in
+*Username*) printf '%s\n' "$GITTA_TEST_USERNAME" ;;
+*Password*) printf '%s\n' "$GITTA_TEST_PASSWORD" ;;
+*) printf '\n' ;;
+esac
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	return []string{
+		"GIT_ASKPASS=" + scriptPath,
+		"GITTA_TEST_USERNAME=" + username,
+		"GITTA_TEST_PASSWORD=" + password,
+	}
+}
+
+func readResponseBody(t *testing.T, res *http.Response) string {
+	t.Helper()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return string(body)
 }

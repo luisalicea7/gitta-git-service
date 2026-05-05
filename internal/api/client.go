@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -54,13 +54,18 @@ func (c *Client) Authorize(ctx context.Context, input AuthRequest) (AuthResponse
 	}
 	defer res.Body.Close()
 
+	responseBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return AuthResponse{}, res.StatusCode, fmt.Errorf("read auth response: %w", err)
+	}
+
 	var auth AuthResponse
-	if err := json.NewDecoder(res.Body).Decode(&auth); err != nil {
-		return AuthResponse{}, res.StatusCode, fmt.Errorf("decode auth response: %w", err)
+	if err := json.Unmarshal(responseBody, &auth); err != nil {
+		return AuthResponse{}, res.StatusCode, fmt.Errorf("decode auth response status=%d body=%q: %w", res.StatusCode, string(responseBody), err)
 	}
 
 	if res.StatusCode >= 500 {
-		return auth, res.StatusCode, errors.New("api internal auth failed")
+		return auth, res.StatusCode, fmt.Errorf("api internal auth failed status=%d reason=%q", res.StatusCode, auth.Reason)
 	}
 
 	return auth, res.StatusCode, nil
@@ -91,13 +96,18 @@ func (c *Client) PostReceive(ctx context.Context, input PostReceiveRequest) (Pos
 	}
 	defer res.Body.Close()
 
+	responseBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return PostReceiveResponse{}, res.StatusCode, fmt.Errorf("read post-receive response: %w", err)
+	}
+
 	var payload PostReceiveResponse
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-		return PostReceiveResponse{}, res.StatusCode, fmt.Errorf("decode post-receive response: %w", err)
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		return PostReceiveResponse{}, res.StatusCode, fmt.Errorf("decode post-receive response status=%d body=%q: %w", res.StatusCode, string(responseBody), err)
 	}
 
 	if res.StatusCode >= 400 {
-		return payload, res.StatusCode, errors.New("api post-receive failed")
+		return payload, res.StatusCode, fmt.Errorf("api post-receive failed status=%d reason=%q", res.StatusCode, payload.Reason)
 	}
 
 	return payload, res.StatusCode, nil
