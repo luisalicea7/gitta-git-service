@@ -43,6 +43,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	mux.HandleFunc("GET /health/live", health.Handler)
 	mux.HandleFunc("GET /health/ready", health.Handler)
 	mux.Handle("POST /internal/repos/commits", commitsHandler)
+	mux.HandleFunc("POST /internal/repos/commit", commitsHandler.Detail)
 	mux.HandleFunc("POST /internal/repos/tree", objectsHandler.Tree)
 	mux.HandleFunc("POST /internal/repos/blob", objectsHandler.Blob)
 	mux.Handle("/", gitHandler)
