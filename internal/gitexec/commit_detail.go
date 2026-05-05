@@ -162,7 +162,7 @@ func ApplyNumstat(files []ChangedFile, output string) {
 		if len(parts) < 3 {
 			continue
 		}
-		path := parts[len(parts)-1]
+		path := normalizeNumstatPath(parts[len(parts)-1])
 		i, ok := index[path]
 		if !ok {
 			continue
@@ -174,6 +174,31 @@ func ApplyNumstat(files []ChangedFile, output string) {
 		files[i].Additions, _ = strconv.Atoi(parts[0])
 		files[i].Deletions, _ = strconv.Atoi(parts[1])
 	}
+}
+
+func normalizeNumstatPath(value string) string {
+	if !strings.Contains(value, "=>") {
+		return value
+	}
+
+	start := strings.Index(value, "{")
+	end := strings.Index(value, "}")
+	if start < 0 || end < start {
+		_, after, ok := strings.Cut(value, "=>")
+		if !ok {
+			return value
+		}
+		return strings.TrimSpace(after)
+	}
+
+	prefix := value[:start]
+	suffix := value[end+1:]
+	inside := value[start+1 : end]
+	_, after, ok := strings.Cut(inside, "=>")
+	if !ok {
+		return value
+	}
+	return prefix + strings.TrimSpace(after) + suffix
 }
 
 func ParsePatch(output string) map[string]FilePatch {
