@@ -22,6 +22,7 @@ type listRequest struct {
 	OwnerUserID  string `json:"ownerUserId"`
 	SHA          string `json:"sha"`
 	Limit        int    `json:"limit"`
+	Path         string `json:"path"`
 }
 
 type listResponse struct {
@@ -80,7 +81,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	commits, err := gitexec.ListCommits(r.Context(), repoPath, input.SHA, input.Limit)
+	commits, err := gitexec.ListCommitsForPath(r.Context(), repoPath, input.SHA, input.Limit, input.Path)
 	if err != nil {
 		h.logger.Error("git log failed", "err", err, "repositoryId", input.RepositoryID)
 		http.Error(w, "git log failed", http.StatusBadGateway)

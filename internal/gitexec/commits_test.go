@@ -80,6 +80,49 @@ func TestListCommits(t *testing.T) {
 	}
 }
 
+func TestListCommitsForPath(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	bareRepo := filepath.Join(t.TempDir(), "repo.git")
+
+	runGit(t, ctx, "", "init", worktree)
+	runGit(t, ctx, worktree, "config", "user.email", "test@example.com")
+	runGit(t, ctx, worktree, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(worktree, "README.md"), []byte("# hello\n"), 0o600); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGit(t, ctx, worktree, "add", "README.md")
+	runGit(t, ctx, worktree, "commit", "-m", "initial readme")
+	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0o700); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "src", "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	runGit(t, ctx, worktree, "add", "src/main.go")
+	runGit(t, ctx, worktree, "commit", "-m", "add main")
+	if err := os.WriteFile(filepath.Join(worktree, "README.md"), []byte("# hello\nupdated\n"), 0o600); err != nil {
+		t.Fatalf("update README: %v", err)
+	}
+	runGit(t, ctx, worktree, "add", "README.md")
+	runGit(t, ctx, worktree, "commit", "-m", "update readme")
+	runGit(t, ctx, "", "init", "--bare", bareRepo)
+	runGit(t, ctx, worktree, "push", bareRepo, "HEAD:refs/heads/main")
+
+	commits, err := ListCommitsForPath(ctx, bareRepo, "refs/heads/main", 10, "src/main.go")
+	if err != nil {
+		t.Fatalf("ListCommitsForPath() error = %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("len(commits) = %d, want 1", len(commits))
+	}
+	if commits[0].Subject != "add main" {
+		t.Fatalf("Subject = %q, want add main", commits[0].Subject)
+	}
+}
+
 func runGit(t *testing.T, ctx context.Context, dir string, args ...string) {
 	t.Helper()
 

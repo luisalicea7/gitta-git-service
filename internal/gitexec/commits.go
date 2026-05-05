@@ -19,9 +19,11 @@ type Commit struct {
 }
 
 func ListCommits(ctx context.Context, repoPath string, revision string, limit int) ([]Commit, error) {
-	cmd := exec.CommandContext(
-		ctx,
-		"git",
+	return ListCommitsForPath(ctx, repoPath, revision, limit, "")
+}
+
+func ListCommitsForPath(ctx context.Context, repoPath string, revision string, limit int, historyPath string) ([]Commit, error) {
+	args := []string{
 		"--git-dir",
 		repoPath,
 		"log",
@@ -29,7 +31,12 @@ func ListCommits(ctx context.Context, repoPath string, revision string, limit in
 		stringLimit(limit),
 		"--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%s%x00%b%x1e",
 		revision,
-	)
+	}
+	if historyPath != "" {
+		args = append(args, "--", historyPath)
+	}
+
+	cmd := exec.CommandContext(ctx, "git", args...)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
