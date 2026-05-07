@@ -1,0 +1,9 @@
+.env
+.git
+.gitignore
+.data
+.cache
+bin
+Dockerfile
+README.md
+test
