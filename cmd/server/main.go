@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luisalicea7/gitta-git-service/internal/api"
+	"github.com/luisalicea7/gitta-git-service/internal/branches"
 	"github.com/luisalicea7/gitta-git-service/internal/commits"
 	"github.com/luisalicea7/gitta-git-service/internal/config"
 	"github.com/luisalicea7/gitta-git-service/internal/health"
@@ -38,6 +39,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	gitHandler := httpgit.NewHandler(apiClient, cfg.RepoRoot, logger)
 	commitsHandler := commits.NewHandler(cfg.RepoRoot, cfg.GitServiceInternalSecret, logger)
 	objectsHandler := objects.NewHandler(cfg.RepoRoot, cfg.GitServiceInternalSecret, logger)
+	branchesHandler := branches.NewHandler(cfg.RepoRoot, cfg.GitServiceInternalSecret, logger)
 
 	mux.HandleFunc("GET /health", health.Handler)
 	mux.HandleFunc("GET /health/live", health.Handler)
@@ -46,6 +48,8 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	mux.HandleFunc("POST /internal/repos/commit", commitsHandler.Detail)
 	mux.HandleFunc("POST /internal/repos/tree", objectsHandler.Tree)
 	mux.HandleFunc("POST /internal/repos/blob", objectsHandler.Blob)
+	mux.HandleFunc("POST /internal/repos/branches", branchesHandler.Create)
+	mux.HandleFunc("DELETE /internal/repos/branches", branchesHandler.Delete)
 	mux.Handle("/", gitHandler)
 
 	server := &http.Server{
