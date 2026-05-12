@@ -1,6 +1,6 @@
 # gitta-git-service
 
-Git smart HTTP service for Gitta.
+Go smart HTTP Git service for Gitta. It shells out to the real `git` binary for clone, fetch, push, object reads, compare, and merge operations.
 
 ## Development
 
@@ -33,3 +33,20 @@ go test ./...
 ```
 
 In restricted sandboxes, integration tests may fail if local TCP listeners are blocked. The integration package starts local `httptest` servers and runs real `git` commands.
+
+## Documentation
+
+Canonical deployed documentation source lives in:
+
+```txt
+../gitta-web/src/docs
+```
+
+Start with:
+
+```txt
+../gitta-web/src/docs/git-service.md
+../gitta-web/src/docs/architecture.md
+../gitta-web/src/docs/deployment.md
+../gitta-web/src/docs/troubleshooting.md
+```
