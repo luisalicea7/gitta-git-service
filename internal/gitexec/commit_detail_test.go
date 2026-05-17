@@ -243,6 +243,51 @@ func TestReadCommitDetailRenameDeleteAndBinary(t *testing.T) {
 	}
 }
 
+func TestReadCommitDetailMergeCommit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	bareRepo := filepath.Join(t.TempDir(), "repo.git")
+
+	runGit(t, ctx, "", "init", worktree)
+	runGit(t, ctx, worktree, "config", "user.email", "test@example.com")
+	runGit(t, ctx, worktree, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(worktree, "README.md"), []byte("# hello\n"), 0o600); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGit(t, ctx, worktree, "add", "README.md")
+	runGit(t, ctx, worktree, "commit", "-m", "initial")
+	runGit(t, ctx, worktree, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(worktree, "feature.txt"), []byte("feature\n"), 0o600); err != nil {
+		t.Fatalf("write feature: %v", err)
+	}
+	runGit(t, ctx, worktree, "add", "feature.txt")
+	runGit(t, ctx, worktree, "commit", "-m", "feature work")
+	runGit(t, ctx, worktree, "checkout", "main")
+	runGit(t, ctx, worktree, "merge", "--no-ff", "--no-edit", "feature")
+	runGit(t, ctx, "", "init", "--bare", bareRepo)
+	runGit(t, ctx, worktree, "push", bareRepo, "HEAD:refs/heads/main")
+
+	sha := strings.TrimSpace(string(runGitOutput(t, ctx, worktree, "rev-parse", "HEAD")))
+	detail, err := ReadCommitDetail(ctx, bareRepo, sha)
+	if err != nil {
+		t.Fatalf("ReadCommitDetail() error = %v", err)
+	}
+	if len(detail.Commit.Parents) != 2 {
+		t.Fatalf("Parents = %#v, want two parents", detail.Commit.Parents)
+	}
+	if detail.Stats.FilesChanged != 1 || len(detail.Files) != 1 {
+		t.Fatalf("merge detail = %#v, want one changed file", detail)
+	}
+	if detail.Files[0].Path != "feature.txt" || detail.Files[0].Status != "added" {
+		t.Fatalf("merge file = %#v, want added feature.txt", detail.Files[0])
+	}
+	if detail.Files[0].Patch == nil || len(detail.Files[0].Patch.Hunks) == 0 {
+		t.Fatalf("merge patch missing: %#v", detail.Files[0])
+	}
+}
+
 func runGitOutput(t *testing.T, ctx context.Context, dir string, args ...string) []byte {
 	t.Helper()
 

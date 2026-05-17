@@ -71,27 +71,9 @@ func ReadCommitDetail(ctx context.Context, repoPath string, sha string) (CommitD
 		return CommitDetail{}, errors.New("commit not found")
 	}
 
-	nameStatusOutput, err := gitOutput(ctx, repoPath, "show", "--format=", "--name-status", "-M", "-C", "--root", fullSHA)
+	files, err := changedFilesForCommit(ctx, repoPath, fullSHA, commits[0].Parents)
 	if err != nil {
 		return CommitDetail{}, err
-	}
-	files := ParseNameStatus(nameStatusOutput)
-
-	numstatOutput, err := gitOutput(ctx, repoPath, "show", "--format=", "--numstat", "-M", "-C", "--root", fullSHA)
-	if err != nil {
-		return CommitDetail{}, err
-	}
-	ApplyNumstat(files, numstatOutput)
-
-	patchOutput, err := gitOutput(ctx, repoPath, "show", "--format=", "--patch", "--find-renames", "--find-copies", "--root", fullSHA)
-	if err != nil {
-		return CommitDetail{}, err
-	}
-	patches := ParsePatch(patchOutput)
-	for index := range files {
-		if patch, ok := patches[files[index].Path]; ok {
-			files[index].Patch = &patch
-		}
 	}
 
 	stats := CommitStats{FilesChanged: len(files)}
@@ -105,6 +87,76 @@ func ReadCommitDetail(ctx context.Context, repoPath string, sha string) (CommitD
 		Stats:  stats,
 		Files:  files,
 	}, nil
+}
+
+func changedFilesForCommit(ctx context.Context, repoPath string, fullSHA string, parents []string) ([]ChangedFile, error) {
+	if len(parents) == 0 {
+		return changedFilesFromShow(ctx, repoPath, fullSHA)
+	}
+
+	files, err := changedFilesFromDiff(ctx, repoPath, parents[0], fullSHA)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(files) > 0 || len(parents) < 2 {
+		return files, nil
+	}
+
+	return changedFilesFromDiff(ctx, repoPath, parents[1], fullSHA)
+}
+
+func changedFilesFromShow(ctx context.Context, repoPath string, fullSHA string) ([]ChangedFile, error) {
+	nameStatusOutput, err := gitOutput(ctx, repoPath, "show", "--format=", "--name-status", "-M", "-C", "--root", fullSHA)
+	if err != nil {
+		return nil, err
+	}
+	files := ParseNameStatus(nameStatusOutput)
+
+	numstatOutput, err := gitOutput(ctx, repoPath, "show", "--format=", "--numstat", "-M", "-C", "--root", fullSHA)
+	if err != nil {
+		return nil, err
+	}
+	ApplyNumstat(files, numstatOutput)
+
+	patchOutput, err := gitOutput(ctx, repoPath, "show", "--format=", "--patch", "--find-renames", "--find-copies", "--root", fullSHA)
+	if err != nil {
+		return nil, err
+	}
+	applyPatches(files, patchOutput)
+
+	return files, nil
+}
+
+func changedFilesFromDiff(ctx context.Context, repoPath string, baseSHA string, headSHA string) ([]ChangedFile, error) {
+	nameStatusOutput, err := gitOutput(ctx, repoPath, "diff", "--name-status", "-M", "-C", baseSHA, headSHA)
+	if err != nil {
+		return nil, err
+	}
+	files := ParseNameStatus(nameStatusOutput)
+
+	numstatOutput, err := gitOutput(ctx, repoPath, "diff", "--numstat", "-M", "-C", baseSHA, headSHA)
+	if err != nil {
+		return nil, err
+	}
+	ApplyNumstat(files, numstatOutput)
+
+	patchOutput, err := gitOutput(ctx, repoPath, "diff", "--patch", "--find-renames", "--find-copies", baseSHA, headSHA)
+	if err != nil {
+		return nil, err
+	}
+	applyPatches(files, patchOutput)
+
+	return files, nil
+}
+
+func applyPatches(files []ChangedFile, patchOutput string) {
+	patches := ParsePatch(patchOutput)
+	for index := range files {
+		if patch, ok := patches[files[index].Path]; ok {
+			files[index].Patch = &patch
+		}
+	}
 }
 
 func ResolveCommit(ctx context.Context, repoPath string, sha string) (string, error) {
