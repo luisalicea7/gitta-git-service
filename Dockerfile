@@ -24,7 +24,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
 FROM alpine:latest
 
 # Install runtime dependencies.
-RUN apk --no-cache add ca-certificates git
+# curl is used by repository pre-receive hooks to call the API branch
+# protection endpoint before accepting pushed refs.
+RUN apk --no-cache add ca-certificates curl git
 
 # Create app directory
 WORKDIR /app
