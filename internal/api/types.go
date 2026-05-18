@@ -49,3 +49,29 @@ type PostReceiveResponse struct {
 	Synced int    `json:"synced"`
 	Reason string `json:"reason"`
 }
+
+type GitRefUpdate struct {
+	OldSHA string `json:"oldSha"`
+	NewSHA string `json:"newSha"`
+	Ref    string `json:"ref"`
+}
+
+type PreReceiveRequest struct {
+	RepositoryID string         `json:"repositoryId"`
+	UserID       string         `json:"userId"`
+	Permission   string         `json:"permission"`
+	Updates      []GitRefUpdate `json:"updates"`
+}
+
+type PreReceiveViolation struct {
+	Ref         string `json:"ref"`
+	Branch      string `json:"branch"`
+	RulePattern string `json:"rulePattern"`
+	Message     string `json:"message"`
+}
+
+type PreReceiveResponse struct {
+	Allowed    bool                  `json:"allowed"`
+	Reason     string                `json:"reason"`
+	Violations []PreReceiveViolation `json:"violations"`
+}

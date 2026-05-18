@@ -29,6 +29,14 @@ func NewClient(baseURL, secret string) *Client {
 	}
 }
 
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
+func (c *Client) Secret() string {
+	return c.secret
+}
+
 func (c *Client) Authorize(ctx context.Context, input AuthRequest) (AuthResponse, int, error) {
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -108,6 +116,48 @@ func (c *Client) PostReceive(ctx context.Context, input PostReceiveRequest) (Pos
 
 	if res.StatusCode >= 400 {
 		return payload, res.StatusCode, fmt.Errorf("api post-receive failed status=%d reason=%q", res.StatusCode, payload.Reason)
+	}
+
+	return payload, res.StatusCode, nil
+}
+
+func (c *Client) PreReceive(ctx context.Context, input PreReceiveRequest) (PreReceiveResponse, int, error) {
+	body, err := json.Marshal(input)
+	if err != nil {
+		return PreReceiveResponse{}, 0, err
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.baseURL+"/internal/git/pre-receive",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return PreReceiveResponse{}, 0, err
+	}
+
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set(internalSecretHeader, c.secret)
+
+	res, err := c.http.Do(req)
+	if err != nil {
+		return PreReceiveResponse{}, 0, err
+	}
+	defer res.Body.Close()
+
+	responseBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return PreReceiveResponse{}, res.StatusCode, fmt.Errorf("read pre-receive response: %w", err)
+	}
+
+	var payload PreReceiveResponse
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		return PreReceiveResponse{}, res.StatusCode, fmt.Errorf("decode pre-receive response status=%d body=%q: %w", res.StatusCode, string(responseBody), err)
+	}
+
+	if res.StatusCode >= 400 {
+		return payload, res.StatusCode, fmt.Errorf("api pre-receive failed status=%d reason=%q", res.StatusCode, payload.Reason)
 	}
 
 	return payload, res.StatusCode, nil

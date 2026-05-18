@@ -30,8 +30,11 @@ type authRule struct {
 }
 
 type fakeAPIState struct {
-	mu          sync.Mutex
-	postReceive []api.PostReceiveRequest
+	mu              sync.Mutex
+	postReceive     []api.PostReceiveRequest
+	preReceiveDeny  bool
+	preReceiveMsg   string
+	preReceiveCalls int
 }
 
 func TestGitHTTPPushAndClone(t *testing.T) {
@@ -160,6 +163,63 @@ func TestGitHTTPRejectsReadOnlyPush(t *testing.T) {
 	}
 }
 
+func TestGitHTTPRejectsProtectedBranchPush(t *testing.T) {
+	repoRoot := t.TempDir()
+	repo := api.Repository{
+		ID:            "repo-1",
+		OwnerUserID:   "owner-1",
+		Owner:         "luis",
+		Name:          "My Repo",
+		Slug:          "my-repo",
+		DefaultBranch: "main",
+	}
+
+	state := &fakeAPIState{
+		preReceiveDeny: true,
+		preReceiveMsg:  "protected branch: main must be updated through a pull request",
+	}
+	apiServer := fakeAPIServer(t, authRule{
+		token:    "write-token",
+		allowed:  true,
+		repo:     repo,
+		username: "luis",
+	}, state)
+	defer apiServer.Close()
+
+	gitServer := gitHTTPServer(apiServer.URL, repoRoot)
+	defer gitServer.Close()
+
+	work := t.TempDir()
+	runGit(t, work, "init")
+	runGit(t, work, "config", "user.email", "test@example.com")
+	runGit(t, work, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(work, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "README.md")
+	runGit(t, work, "commit", "-m", "initial")
+	runGit(t, work, "branch", "-M", "main")
+	runGit(t, work, "remote", "add", "origin", gitServer.URL+"/luis/my-repo.git")
+
+	cmd := gitCmdWithEnv(work, credentialPromptEnv(t, "luis", "write-token"), "push", "origin", "main")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("git push succeeded, want protected branch rejection")
+	}
+	if !strings.Contains(string(output), state.preReceiveMsg) {
+		t.Fatalf("git push output missing protected branch message:\n%s", string(output))
+	}
+	if state.preReceiveCallCount() == 0 {
+		t.Fatal("expected pre-receive API call")
+	}
+}
+
+func (s *fakeAPIState) preReceiveCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.preReceiveCalls
+}
+
 func TestGitHTTPCloneBeforeFirstPushReturnsNotFound(t *testing.T) {
 	apiServer := fakeAPIServer(t, authRule{
 		token:    "write-token",
@@ -193,6 +253,10 @@ func fakeAPIServer(t *testing.T, rule authRule, state *fakeAPIState) *httptest.S
 	return newLocalServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/internal/git/post-receive" {
 			handlePostReceive(w, r, state)
+			return
+		}
+		if r.URL.Path == "/internal/git/pre-receive" {
+			handlePreReceive(w, r, state)
 			return
 		}
 
@@ -231,6 +295,36 @@ func fakeAPIServer(t *testing.T, rule authRule, state *fakeAPIState) *httptest.S
 			Permission: "owner",
 		})
 	}))
+}
+
+func handlePreReceive(w http.ResponseWriter, r *http.Request, state *fakeAPIState) {
+	if r.Header.Get("x-gitta-internal-secret") != internalSecret {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(api.PreReceiveResponse{Allowed: false, Reason: "unauthorized"})
+		return
+	}
+
+	if state != nil {
+		state.mu.Lock()
+		state.preReceiveCalls++
+		deny := state.preReceiveDeny
+		msg := state.preReceiveMsg
+		state.mu.Unlock()
+
+		if deny {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(api.PreReceiveResponse{
+				Allowed: false,
+				Reason:  "protected_branch",
+				Violations: []api.PreReceiveViolation{
+					{Ref: "refs/heads/main", Branch: "main", RulePattern: "main", Message: msg},
+				},
+			})
+			return
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(api.PreReceiveResponse{Allowed: true})
 }
 
 func handlePostReceive(w http.ResponseWriter, r *http.Request, state *fakeAPIState) {

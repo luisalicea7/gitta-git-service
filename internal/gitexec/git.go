@@ -47,6 +47,7 @@ func RunRPC(
 	stdout io.Writer,
 	service Service,
 	repoPath string,
+	env []string,
 	logger *slog.Logger,
 ) error {
 	cmd := exec.CommandContext(
@@ -61,6 +62,9 @@ func RunRPC(
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
+	if len(env) > 0 {
+		cmd.Env = append(cmd.Environ(), env...)
+	}
 
 	err := cmd.Run()
 	if stderr.Len() > 0 {

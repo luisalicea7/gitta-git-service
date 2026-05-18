@@ -94,7 +94,7 @@ func (h *Handler) handleRPC(w http.ResponseWriter, r *http.Request, route Route)
 	}
 
 	w.Header().Set("content-type", service.ResultContentType())
-	if err := gitexec.RunRPC(r.Context(), r.Body, w, service, repoPath, h.logger); err != nil {
+	if err := gitexec.RunRPC(r.Context(), r.Body, w, service, repoPath, h.service.GitEnv(auth), h.logger); err != nil {
 		h.logger.Error("git rpc failed", "err", err, "service", service)
 		return
 	}

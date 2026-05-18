@@ -2,6 +2,7 @@ package httpgit
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/luisalicea7/gitta-git-service/internal/api"
@@ -61,6 +62,9 @@ func (s *Service) PrepareRepository(
 		if err := repos.EnsureBare(ctx, repoPath); err != nil {
 			return "", PrepareInternalError, err
 		}
+		if err := repos.EnsurePreReceiveHook(repoPath); err != nil {
+			return "", PrepareInternalError, err
+		}
 		return repoPath, PrepareOK, nil
 	}
 
@@ -80,6 +84,16 @@ func (s *Service) PostReceive(
 		RepositoryID: auth.Repository.ID,
 		Refs:         refs,
 	})
+}
+
+func (s *Service) GitEnv(auth api.AuthResponse) []string {
+	return []string{
+		fmt.Sprintf("GITTA_API_URL=%s", s.apiClient.BaseURL()),
+		fmt.Sprintf("GITTA_INTERNAL_SECRET=%s", s.apiClient.Secret()),
+		fmt.Sprintf("GITTA_REPOSITORY_ID=%s", auth.Repository.ID),
+		fmt.Sprintf("GITTA_USER_ID=%s", auth.UserID),
+		fmt.Sprintf("GITTA_PERMISSION=%s", auth.Permission),
+	}
 }
 
 type PrepareResult string
